@@ -27,6 +27,11 @@ import (
 
 var logger = log.With().Caller().Stack().Str("component", "configuration").Logger()
 
+type Database struct {
+	AllowSlowLookup bool `koanf:"allow-slow-lookup"`
+	BlockCacheSize  int  `koanf:"block-cache-size"`
+}
+
 type FeedInput struct {
 	Timeout time.Duration `koanf:"timeout"`
 	URLs    []string      `koanf:"url"`
@@ -131,6 +136,7 @@ type Log struct {
 type Config struct {
 	BridgeUtilsAddress string      `koanf:"bridge-utils-address"`
 	Conf               string      `koanf:"conf"`
+	Database           Database    `koanf:"database"`
 	DumpConf           bool        `koanf:"dump-conf"`
 	EnvPrefix          string      `koanf:"env-prefix"`
 	Feed               Feed        `koanf:"feed"`
@@ -194,6 +200,9 @@ func ParseValidator(ctx context.Context) (*Config, *Wallet, *ethutils.RPCEthClie
 
 func ParseNonRelay(ctx context.Context, f *flag.FlagSet) (*Config, *Wallet, *ethutils.RPCEthClient, *big.Int, error) {
 	f.String("bridge-utils-address", "", "bridgeutils contract address")
+
+	f.Bool("database.allow-slow-lookup", false, "load L2 block from disk if not in cache")
+	f.Int("database.block-cache-size", 1000, "number of L2 blocks to hold in lru cache")
 
 	f.Float64("gas-price", 4.5, "gasprice=FloatInGwei")
 	f.String("gas-price-url", "", "gas price rpc url (etherscan compatible)")

@@ -46,6 +46,7 @@ type TransactAuth struct {
 	sync.Mutex
 	auth        *bind.TransactOpts
 	gasPriceUrl string
+	sendTx      func(ctx context.Context, tx *types.Transaction) error
 }
 
 func NewTransactAuth(ctx context.Context, client ethutils.EthClient, auth *bind.TransactOpts, gasPriceUrl string) (*TransactAuth, error) {
@@ -56,9 +57,22 @@ func NewTransactAuth(ctx context.Context, client ethutils.EthClient, auth *bind.
 		}
 		auth.Nonce = new(big.Int).SetUint64(nonce)
 	}
+
+	sendTx := func(ctx context.Context, tx *types.Transaction) error {
+		logger.Debug().Hex("data", tx.Data()).Msg("sending transaction")
+		err := client.SendTransaction(ctx, tx)
+		if err != nil {
+			logger.Error().Err(err).Hex("data", tx.Data()).Msg("error sending transaction")
+			return err
+		}
+
+		return nil
+	}
+
 	return &TransactAuth{
 		auth:        auth,
 		gasPriceUrl: gasPriceUrl,
+		sendTx:      sendTx,
 	}, nil
 }
 
@@ -68,8 +82,19 @@ func (t *TransactAuth) makeContract(ctx context.Context, contractFunc func(auth 
 		return ethcommon.Address{}, nil, err
 	}
 
+	// Form transaction without sending it
+	t.auth.NoSend = true
 	addr, tx, _, err := contractFunc(auth)
+	t.auth.NoSend = false
 	err = errors.WithStack(err)
+	if err != nil {
+		// Error ocurred before sending, so don't need retry logic below
+		logger.Error().Err(err).Msg("error forming transaction")
+		return addr, nil, err
+	}
+
+	// Actually send transaction
+	err = t.sendTx(ctx, tx)
 
 	if auth.Nonce == nil {
 		// Not incrementing nonce, so nothing else to do
@@ -88,7 +113,8 @@ func (t *TransactAuth) makeContract(ctx context.Context, contractFunc func(auth 
 
 		t.auth.Nonce = t.auth.Nonce.Add(t.auth.Nonce, big.NewInt(1))
 		auth.Nonce = t.auth.Nonce
-		addr, tx, _, err = contractFunc(auth)
+		//addr, tx, _, err = contractFunc(auth)
+		err = t.sendTx(ctx, tx)
 		err = errors.WithStack(err)
 
 		time.Sleep(100 * time.Millisecond)
